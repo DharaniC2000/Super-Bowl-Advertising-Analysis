@@ -1,0 +1,121 @@
+---
+title: "Walmart Store Forecasting"
+author: "Dharani"
+date: "2025-02-16"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/dharani/Documents/Kaggle projects/Data/Walmart_sales_forecast")
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r import, include=FALSE}
+
+install.packages("tidyverse")
+install.packages("lubridate")
+install.packages("ggplot2")
+install.packages("forecast")
+install.packages("rstan", repos = "https://cloud.r-project.org/", dependencies = TRUE)
+install.packages("remotes")
+install.packages("prophet", repos = "https://cloud.r-project.org/")
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(forecast)
+library(prophet)
+setwd("/Users/dharani/Documents/Kaggle projects/Data/Walmart_sales_forecast")
+features <- read.csv(file = "features.csv")
+stores <- read.csv(file = "stores.csv")
+test <- read.csv(file = "test.csv")
+train <- read.csv(file = "train.csv")
+
+features$Date <- as.Date(features$Date, format="%Y-%m-%d")
+test$Date <- as.Date(test$Date, format="%Y-%m-%d")
+train$Date <- as.Date(train$Date, format="%Y-%m-%d")
+
+#Merge train dataset with features and stores dataset
+train_data <- train %>%
+  left_join(stores, by = "Store") %>%
+  left_join(features, by = c("Store", "Date"))
+
+#Merge train dataset with features and stores dataset
+test_data <- test %>%
+  left_join(stores, by = "Store") %>%
+  left_join(features, by = c("Store", "Date"))
+
+view(train_data)
+view(test_data)
+
+# Aggregate sales by date for overall trend analysis
+sales_data <- train_data %>%
+  group_by(Date) %>%
+  summarise(Total_Sales = sum(Weekly_Sales))
+
+view(sales_data)
+
+sales_data$Date <- as.Date(sales_data$Date)
+
+ggplot(sales_data, aes(x=Date, y=Total_Sales)) +
+  geom_line(color="blue") +
+  labs(title="Walmart Sales Over Time", x="Date", y="Total Sales")+
+  theme_minimal()
+
+# Convert to time series
+ts_sales <- ts(sales_data$Total_Sales, frequency=52, start=c(2010, 1))
+view(ts_sales)
+
+#Decompose time series (Analyze trend & seasonality)
+sales_decomp <- decompose(ts_sales)
+plot(sales_decomp)
+
+# Build ARIMA Model for Forecasting
+arima_model <- auto.arima(ts_sales)
+arima_forecast <- forecast(arima_model, h=12) 
+# Forecast next 12 weeks
+plot(arima_forecast, main="ARIMA Forecast for Walmart Sales")
+
+# Prophet Model for Advanced Forecasting
+df_prophet <- sales_data %>%
+# Prophet requires ds (date) and y (sales)
+  rename(ds = Date, y = Total_Sales)
+
+
+prophet_model <- prophet(df_prophet)
+future <- make_future_dataframe(prophet_model, periods=12, freq='week')
+forecast <- predict(prophet_model, future)
+
+# Plot Prophet Forecast
+prophet_plot_components(prophet_model, forecast)
+
+# Display Forecasted Sales (Next 12 Weeks)
+forecast %>%
+  select(ds, yhat, yhat_lower, yhat_upper) %>%
+# Show last 12 weeks forecasted values
+  tail(12)
+
+# Predict Future Sales for Test Dataset (Using ARIMA)
+test_ts <- ts(train_data$Weekly_Sales, frequency=52)
+arima_model <- auto.arima(test_ts)
+test_forecast <- forecast(arima_model, h=nrow(test_data))
+print(test_forecast)
+
+# Add predictions to test dataset
+test_data$Predicted_Sales <- test_forecast$mean
+
+# Save the test dataset with predictions
+
+getwd()
+write.csv(train_data, "walmart_train_data.csv", row.names = FALSE)
+write.csv(forecast, "walmart_test_forecast.csv", row.names = FALSE)
+
+
+```
